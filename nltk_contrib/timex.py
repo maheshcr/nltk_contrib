@@ -32,12 +32,14 @@ iso = "\d+[/-]\d+[/-]\d+ \d+:\d+:\d+\.\d+"
 year = "((?<=\s)\d{4}|^\d{4})"
 regxp1 = "((\d+|(" + numbers + "[-\s]?)+) " + dmy + "s? " + exp1 + ")"
 regxp2 = "(" + exp2 + " (" + dmy + "|" + week_day + "|" + month + "))"
+regxp3 = "(in " + "(\d+|" + numbers + "[-\s]?)+" + " (" + dmy + "s?" + "))"
 
 reg1 = re.compile(regxp1, re.IGNORECASE)
 reg2 = re.compile(regxp2, re.IGNORECASE)
 reg3 = re.compile(rel_day, re.IGNORECASE)
 reg4 = re.compile(iso)
 reg5 = re.compile(year)
+reg6 = re.compile(regxp3, re.IGNORECASE)
 
 def tag(text):
 
@@ -70,6 +72,13 @@ def tag(text):
     # Year
     found = reg5.findall(text)
     for timex in found:
+        timex_found.append(timex)
+
+     # in 10/two days/weeks/months/years etc
+    found = reg6.findall(text)
+    found = [a[0] for a in found if len(a) > 1]
+    for timex in found:
+        print timex
         timex_found.append(timex)
 
     # Tag only temporal expressions which haven't been tagged.
@@ -185,13 +194,29 @@ def ground(tagged_text, base_date):
         # If numbers are given in words, hash them into corresponding numbers.
         # eg. twenty five days ago --> 25 days ago
         if re.search(numbers, timex, re.IGNORECASE):
+
             split_timex = re.split(r'\s(?=days?|months?|years?|weeks?)', \
                                                               timex, re.IGNORECASE)
+
+            print split_timex
             value = split_timex[0]
+
+            #Crude, crude..it hurts preciousss!
+            #check if expression starts with "in"
+            if value.startswith("in"):
+                value = value.split("in ")
+                value = value[1]
             unit = split_timex[1]
+
             num_list = map(lambda s:hashnum(s),re.findall(numbers + '+', \
                                           value, re.IGNORECASE))
-            timex = `sum(num_list)` + ' ' + unit
+
+            #after fixing numbers, reattach prefix for later
+            if timex.startswith("in"):
+                timex = "in " + `sum(num_list)` + ' ' + unit
+            else:
+                timex = `sum(num_list)` + ' ' + unit
+
 
         # If timex matches ISO format, remove 'time' and reorder 'date'
         if re.match(r'\d+[/-]\d+[/-]\d+ \d+:\d+:\d+\.\d+', timex):
@@ -245,6 +270,28 @@ def ground(tagged_text, base_date):
             year = (base_date + RelativeDateTime(weeks=+1)).year
             week = (base_date + RelativeDateTime(weeks=+1)).iso_week[1]
             timex_val = str(year) + 'W' + str(week)
+
+        #deal with expressions starting with "in"
+        elif re.match(r'in \d+ (week|month|day|year)s?', timex, re.IGNORECASE):
+            parts = re.split(r'\s', timex)
+            offset = int(parts[1])
+            unit = parts[2]
+            if unit.startswith("day"):
+                timex_val = str(base_date + RelativeDateTime(days=+offset))
+            elif unit.startswith("week"):
+                timex_val = str(base_date + RelativeDateTime(weeks=+offset, \
+                              weekday=(day,0)))
+            elif unit.startswith("month"):
+                extra = 0
+                if (base_date.month + offset % 12) > 12:
+                    extra = 1
+                year = str(base_date.year + offset // 12 + extra)
+                month = str((base_date.month + offset % 12) % 12)
+                if month == '0':
+                    month = '12'
+                timex_val = year + '-' + month
+            elif unit.startswith("year"):
+                timex_val = str(base_date.year + offset)
 
         # Month in the previous year.
         elif re.match(r'last ' + month, timex, re.IGNORECASE):
